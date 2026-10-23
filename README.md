@@ -7,6 +7,8 @@ A support portal for BookLeaf Publishing with two interfaces:
 
 When the AI is down, rate-limited or not configured, the app keeps working: tickets are still created, a keyword classifier takes over, and admins get a policy template filled with the author's real numbers. Either way, they can always write a reply by hand.
 
+**Live demo:** https://bookleaf-cafc.onrender.com. Sign in as `admin@bookleaf.com` / `admin123` (admin) or `priya.sharma@email.com` / `author123` (author); more logins are under [Demo credentials](#demo-credentials). It runs on Render's free plan, so the first request after a period of inactivity can take up to a minute while the service wakes up. Data created during testing resets on restart; the sample dataset is re-seeded automatically.
+
 ---
 
 ## Contents
