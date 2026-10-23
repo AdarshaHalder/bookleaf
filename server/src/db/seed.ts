@@ -13,7 +13,8 @@ type SampleBook = (typeof sampleData.authors)[number]["books"][number];
 
 /**
  * A few realistic historical tickets so the admin queue isn't empty on first login.
- * They are pre-classified (category_source = 'admin') so seeding never calls the AI.
+ * They are inserted unclassified; the server classifies pending tickets on boot through the
+ * normal pipeline (AI, or the rules fallback when no key is configured).
  */
 const SEED_TICKETS = [
   {
@@ -22,8 +23,6 @@ const SEED_TICKETS = [
     subject: "Haven't received any royalty since publication",
     description:
       "My book Between Two Temples was published in July 2024 and the dashboard shows ₹2,546 pending, but I have never received a single payout. My bank details were added months ago. What is going on?",
-    category: "Royalty & Payments",
-    priority: "High",
     hoursAgo: 52,
   },
   {
@@ -32,8 +31,6 @@ const SEED_TICKETS = [
     subject: "Raising Roots stuck in typesetting",
     description:
       "It's been over 3 weeks and my book is still showing 'Typesetting'. I approved the cover long ago. When will it move to proofreading?",
-    category: "Book Status & Production Updates",
-    priority: "Medium",
     hoursAgo: 30,
   },
   {
@@ -42,8 +39,6 @@ const SEED_TICKETS = [
     subject: "Startup Sutra shows 'Currently Unavailable' on Amazon US",
     description:
       "Readers in the US are telling me the book shows as currently unavailable on Amazon US since last week. It is my best-selling title, please fix this urgently.",
-    category: "Distribution & Availability",
-    priority: "High",
     hoursAgo: 6,
   },
   {
@@ -51,8 +46,6 @@ const SEED_TICKETS = [
     bookId: null,
     subject: "How do I update my author bio?",
     description: "I'd like to update the author bio that appears on my book pages. Where can I do this?",
-    category: "General Inquiry",
-    priority: "Low",
     hoursAgo: 75,
   },
 ] as const;
@@ -107,9 +100,8 @@ export function seedDatabase(db: DB, { reset = false } = {}): { seeded: boolean 
 
     const userIdFor = db.prepare("SELECT id FROM users WHERE author_id = ?");
     const insertTicket = db.prepare(
-      `INSERT INTO tickets (author_id, book_id, subject, description, status, category, category_source,
-         priority, priority_source, classification_status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, 'Open', ?, 'admin', ?, 'admin', 'done', ?, ?)`,
+      `INSERT INTO tickets (author_id, book_id, subject, description, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'Open', ?, ?)`,
     );
     const insertMessage = db.prepare(
       "INSERT INTO ticket_messages (ticket_id, sender_role, sender_user_id, body, created_at) VALUES (?, 'author', ?, ?, ?)",
@@ -117,7 +109,7 @@ export function seedDatabase(db: DB, { reset = false } = {}): { seeded: boolean 
     for (const t of SEED_TICKETS) {
       const createdAt = new Date(Date.now() - t.hoursAgo * 3_600_000).toISOString();
       const { lastInsertRowid } = insertTicket.run(
-        t.authorId, t.bookId, t.subject, t.description, t.category, t.priority, createdAt, createdAt,
+        t.authorId, t.bookId, t.subject, t.description, createdAt, createdAt,
       );
       const user = userIdFor.get(t.authorId) as { id: number };
       insertMessage.run(lastInsertRowid, user.id, t.description, createdAt);

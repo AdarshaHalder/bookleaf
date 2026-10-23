@@ -18,6 +18,8 @@ export interface RoyaltyCalendar {
   lastQuarterPayoutDeadline: string;
   /** The next payout date that hasn't passed yet. */
   nextPayoutDeadline: string;
+  /** The most recent payout deadline that has already passed. */
+  lastPassedPayoutDeadline: string;
 }
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
@@ -27,6 +29,8 @@ export function royaltyCalendar(now = new Date()): RoyaltyCalendar {
   const prevEnd = quarterEnd(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 3, 1)));
   const prevDeadline = new Date(prevEnd.getTime() + 45 * DAY_MS);
   const currentDeadline = new Date(currentEnd.getTime() + 45 * DAY_MS);
+  const prevPrevEnd = quarterEnd(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 6, 1)));
+  const prevPrevDeadline = new Date(prevPrevEnd.getTime() + 45 * DAY_MS);
   const q = Math.floor(now.getUTCMonth() / 3) + 1;
   return {
     today: iso(now),
@@ -34,5 +38,6 @@ export function royaltyCalendar(now = new Date()): RoyaltyCalendar {
     currentQuarterEnds: iso(currentEnd),
     lastQuarterPayoutDeadline: iso(prevDeadline),
     nextPayoutDeadline: iso(prevDeadline >= now ? prevDeadline : currentDeadline),
+    lastPassedPayoutDeadline: iso(prevDeadline < now ? prevDeadline : prevPrevDeadline),
   };
 }

@@ -15,8 +15,10 @@ const CATEGORY_KEYWORDS: Array<[Category, RegExp]> = [
 ];
 
 const HIGH_SIGNALS =
-  /\b(never received|not received|haven'?t received|months?|overdue|urgent|asap|wrong isbn|duplicate|legal|lawyer|refund|cancel|fraud|unacceptable)\b/i;
-const LOW_SIGNALS = /\b(how (do|can) i|can i|is it possible|question|curious|update (my )?(bio|photo)|just wondering)\b/i;
+  /\b(never received|not received|haven'?t received|months?|overdue|urgent(ly)?|asap|duplicate|legal|lawyer|refund|cancel|fraud|unacceptable)\b/i;
+const LOW_SIGNALS = /\b(how (do|can) i|can i|is it possible|question|curious|update (my )?(author )?(bio|photo|description)|just wondering)\b/i;
+/** ISBN *errors* are high priority by policy; routine metadata edits are not. */
+const ISBN_ERROR = /\b(isbn)\b[\s\S]*\b(wrong|incorrect|different|duplicate|mismatch|error)\b|\b(wrong|incorrect|different|duplicate|mismatch(ed)?)\b[\s\S]*\bisbn\b/i;
 
 export function classifyWithRules(subject: string, description: string): {
   category: Category;
@@ -28,7 +30,7 @@ export function classifyWithRules(subject: string, description: string): {
   const category: Category = match ? match[0] : "General Inquiry";
 
   let priority: Priority = "Medium";
-  if (HIGH_SIGNALS.test(text) || category === "ISBN & Metadata Issues") priority = "High";
+  if (HIGH_SIGNALS.test(text) || ISBN_ERROR.test(text)) priority = "High";
   else if (LOW_SIGNALS.test(text) || category === "General Inquiry") priority = "Low";
 
   return {
