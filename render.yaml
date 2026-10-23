@@ -1,4 +1,4 @@
-# One-click deploy on Render (Blueprint). Set ANTHROPIC_API_KEY in the dashboard after creation.
+# One-click deploy on Render (Blueprint). Set OPENAI_API_KEY in the dashboard after creation.
 services:
   - type: web
     name: bookleaf-author-support
@@ -12,7 +12,7 @@ services:
     envVars:
       - key: JWT_SECRET
         generateValue: true
-      - key: ANTHROPIC_API_KEY
+      - key: OPENAI_API_KEY
         sync: false
       - key: AI_MODEL
-        value: claude-opus-5-5
+        value: gpt-4o-mini

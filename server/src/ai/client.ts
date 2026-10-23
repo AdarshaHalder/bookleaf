@@ -1,9 +1,9 @@
-import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 import { env } from "../config/env";
 import { getDb } from "../db/connection";
 
 /**
- * Thin wrapper around the Anthropic SDK that adds the production concerns every AI call needs:
+ * Thin wrapper around the OpenAI SDK that adds the production concerns every AI call needs:
  *
  *  1. Availability — `isAiAvailable()` is false when no key is configured, AI is disabled by
  *     flag, or the circuit breaker is open. Callers then go straight to their fallback.
@@ -15,13 +15,13 @@ import { getDb } from "../db/connection";
  * The SDK itself retries 408/409/429/5xx with backoff (maxRetries below).
  */
 
-let client: Anthropic | null = null;
+let client: OpenAI | null = null;
 
-export function getAnthropic(): Anthropic | null {
-  if (env.AI_DISABLED || !env.ANTHROPIC_API_KEY) return null;
+export function getOpenAI(): OpenAI | null {
+  if (env.AI_DISABLED || !env.OPENAI_API_KEY) return null;
   if (!client) {
-    client = new Anthropic({
-      apiKey: env.ANTHROPIC_API_KEY,
+    client = new OpenAI({
+      apiKey: env.OPENAI_API_KEY,
       timeout: env.AI_TIMEOUT_MS,
       maxRetries: 2,
     });
@@ -30,7 +30,7 @@ export function getAnthropic(): Anthropic | null {
 }
 
 /** Test hook. */
-export function setAnthropic(c: Anthropic | null): void {
+export function setOpenAI(c: OpenAI | null): void {
   client = c;
 }
 
@@ -39,12 +39,12 @@ const BREAKER_COOLDOWN_MS = 60_000;
 const breaker = { consecutiveFailures: 0, openUntil: 0 };
 
 export function isAiAvailable(): boolean {
-  return getAnthropic() !== null && Date.now() >= breaker.openUntil;
+  return getOpenAI() !== null && Date.now() >= breaker.openUntil;
 }
 
 export function aiStatus() {
   return {
-    configured: getAnthropic() !== null,
+    configured: getOpenAI() !== null,
     model: env.AI_MODEL,
     circuitOpen: Date.now() < breaker.openUntil,
     consecutiveFailures: breaker.consecutiveFailures,
@@ -56,30 +56,34 @@ export function resetBreaker(): void {
   breaker.openUntil = 0;
 }
 
-type Usage = Anthropic.Beta.BetaUsage;
+type Usage = OpenAI.CompletionUsage;
 
 interface CallMeta {
   operation: "classify" | "draft";
   ticketId: number | null;
 }
 
+interface CompletionLike {
+  usage?: Usage;
+  choices: Array<{ finish_reason: string; message: { refusal?: string | null } }>;
+}
+
 /**
- * Runs one model call with breaker accounting and usage logging. Throws on failure so the
- * caller can apply its own domain-specific fallback.
+ * Runs one model call with breaker accounting and usage logging. Throws on failure (including
+ * refusals and truncated output) so the caller can apply its own domain-specific fallback.
  */
-export async function trackedCall<T extends { usage: Usage; stop_reason: string | null }>(
-  meta: CallMeta,
-  fn: (client: Anthropic) => Promise<T>,
-): Promise<T> {
-  const anthropic = getAnthropic();
-  if (!anthropic || !isAiAvailable()) throw new AiUnavailableError("AI is not available");
+export async function trackedCall<T extends CompletionLike>(meta: CallMeta, fn: (client: OpenAI) => Promise<T>): Promise<T> {
+  const openai = getOpenAI();
+  if (!openai || !isAiAvailable()) throw new AiUnavailableError("AI is not available");
 
   const started = Date.now();
   try {
-    const response = await fn(anthropic);
-    if (response.stop_reason === "refusal") throw new AiUnavailableError("Model declined the request");
+    const response = await fn(openai);
+    const choice = response.choices[0];
+    if (choice?.message.refusal) throw new AiUnavailableError("Model declined the request");
+    if (choice?.finish_reason === "length") throw new AiUnavailableError("Model output was truncated");
     breaker.consecutiveFailures = 0;
-    logUsage(meta, true, Date.now() - started, response.usage, null);
+    logUsage(meta, true, Date.now() - started, response.usage ?? null, null);
     return response;
   } catch (err) {
     breaker.consecutiveFailures += 1;
@@ -95,11 +99,11 @@ export async function trackedCall<T extends { usage: Usage; stop_reason: string 
 export class AiUnavailableError extends Error {}
 
 function describeError(err: unknown): string {
-  if (err instanceof Anthropic.RateLimitError) return "rate_limited";
-  if (err instanceof Anthropic.AuthenticationError) return "authentication_failed";
-  if (err instanceof Anthropic.APIConnectionTimeoutError) return "timeout";
-  if (err instanceof Anthropic.APIConnectionError) return "connection_error";
-  if (err instanceof Anthropic.APIError) return `api_error_${err.status ?? "unknown"}`;
+  if (err instanceof OpenAI.RateLimitError) return "rate_limited";
+  if (err instanceof OpenAI.AuthenticationError) return "authentication_failed";
+  if (err instanceof OpenAI.APIConnectionTimeoutError) return "timeout";
+  if (err instanceof OpenAI.APIConnectionError) return "connection_error";
+  if (err instanceof OpenAI.APIError) return `api_error_${err.status ?? "unknown"}`;
   if (err instanceof Error) return err.message.slice(0, 200);
   return "unknown_error";
 }
@@ -117,10 +121,10 @@ function logUsage(meta: CallMeta, success: boolean, latencyMs: number, usage: Us
         meta.operation,
         env.AI_MODEL,
         success ? 1 : 0,
-        usage?.input_tokens ?? null,
-        usage?.output_tokens ?? null,
-        usage?.cache_read_input_tokens ?? null,
-        usage?.cache_creation_input_tokens ?? null,
+        usage?.prompt_tokens ?? null,
+        usage?.completion_tokens ?? null,
+        usage?.prompt_tokens_details?.cached_tokens ?? null,
+        null, // OpenAI caches automatically and doesn't report cache writes
         latencyMs,
         error,
       );

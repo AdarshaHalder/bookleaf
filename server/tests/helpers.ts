@@ -1,9 +1,9 @@
-import type Anthropic from "@anthropic-ai/sdk";
+import type OpenAI from "openai";
 import request from "supertest";
 import { vi } from "vitest";
 import { createApp } from "../src/app";
 import { classifyPendingInBackground, waitForBackgroundWork } from "../src/ai/classifier";
-import { resetBreaker, setAnthropic } from "../src/ai/client";
+import { resetBreaker, setOpenAI } from "../src/ai/client";
 import { getDb } from "../src/db/connection";
 import { seedDatabase } from "../src/db/seed";
 
@@ -19,17 +19,16 @@ export async function resetData() {
   resetBreaker();
 }
 
-/** Installs a fake Anthropic client whose `beta.messages.parse` is a vi.fn(). */
+/** Installs a fake OpenAI client whose `chat.completions.parse` is a vi.fn(). */
 export function fakeAi() {
   const parse = vi.fn();
-  setAnthropic({ beta: { messages: { parse } } } as unknown as Anthropic);
+  setOpenAI({ chat: { completions: { parse } } } as unknown as OpenAI);
   return parse;
 }
 
 export const aiResponse = (parsed: unknown) => ({
-  parsed_output: parsed,
-  stop_reason: "end_turn",
-  usage: { input_tokens: 500, output_tokens: 120, cache_read_input_tokens: 400, cache_creation_input_tokens: 0 },
+  choices: [{ finish_reason: "stop", message: { parsed, refusal: null } }],
+  usage: { prompt_tokens: 500, completion_tokens: 120, prompt_tokens_details: { cached_tokens: 400 } },
 });
 
 export async function login(email: string, password: string): Promise<string> {

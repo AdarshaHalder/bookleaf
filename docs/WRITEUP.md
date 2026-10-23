@@ -9,7 +9,7 @@
 **Trade-offs.**
 - *SQLite and one process* instead of Postgres and Redis: the demo boots seeded with no infrastructure. The schema is Postgres-portable, and the SSE hub is the one piece that needs pub/sub to scale out.
 - *SSE instead of WebSockets*: updates only flow one way. Events carry ids only and clients refetch, so access control lives in one place.
-- *Claude Opus 5.5 with tuned effort* (low for classification, medium for drafts) instead of a cheaper model: draft quality is what support staff feel. The model is one env var, and the override and usage data being logged is what I'd use to decide when to move classification to a cheaper model.
+- *`gpt-4o-mini` instead of a larger model*: it's cheap enough to run on every ticket, and because the server supplies the policies, numbers and computed payout facts, the model mostly handles tone. The model is one env var, and the override and usage data being logged is what I'd use to decide whether drafts need a stronger model.
 - *A static knowledge base in code* instead of a CMS or retrieval: the KB is small, and slicing it by category already keeps prompts lean.
 
 **Evolving this into production.**

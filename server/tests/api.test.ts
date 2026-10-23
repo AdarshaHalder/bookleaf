@@ -97,9 +97,10 @@ describe("ticket lifecycle", () => {
     await waitForBackgroundWork();
 
     const call = parse.mock.calls[0][0];
-    expect(call.output_config.effort).toBe("low");
-    expect(call.messages[0].content).toContain("<ticket>");
-    expect(call.messages[0].content).toContain("Whispers of the Ganges");
+    expect(call.temperature).toBe(0);
+    expect(call.response_format.json_schema.strict).toBe(true);
+    expect(call.messages[1].content).toContain("<ticket>");
+    expect(call.messages[1].content).toContain("Whispers of the Ganges");
 
     const detail = await request(app).get(`/api/tickets/${res.body.data.ticket.id}`).set(auth(await asAdmin()));
     expect(detail.body.data.ticket).toMatchObject({ category: "ISBN & Metadata Issues", priority: "Critical", categorySource: "ai" });
@@ -217,10 +218,10 @@ describe("AI drafts", () => {
     expect(first.body.data).toMatchObject({ source: "ai", cached: false, meta: { escalation: { team: "Finance" } } });
 
     const call = parse.mock.calls[0][0];
-    const kb = call.system[1].text as string;
+    const kb = call.messages[1].content as string;
     expect(kb).toContain("Royalty policy");
     expect(kb).not.toContain("Printing & quality");
-    expect(call.messages[0].content).toContain("OVERDUE");
+    expect(call.messages[2].content).toContain("OVERDUE");
 
     const second = await request(app).get(`/api/tickets/${id}/draft`).set(auth(admin));
     expect(second.body.data.cached).toBe(true);

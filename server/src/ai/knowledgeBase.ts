@@ -79,7 +79,7 @@ const SECTIONS_BY_CATEGORY: Record<Category, string[]> = {
   "General Inquiry": [KB_ISBN, KB_ROYALTY, KB_DISTRIBUTION],
 };
 
-/** The category-specific knowledge block for a draft prompt (stable per category → cacheable). */
+/** The category-specific knowledge block for a draft prompt (stable per category, so cache-friendly). */
 export function knowledgeForCategory(category: Category): string {
   return [...SECTIONS_BY_CATEGORY[category], `## Reference handling for this category\n${EXAMPLES[category]}`].join(
     "\n\n",
