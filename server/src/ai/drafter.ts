@@ -1,4 +1,4 @@
-import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
+import { zodResponseFormat } from "openai/helpers/zod";
 import { z } from "zod";
 import { env } from "../config/env";
 import { getDb } from "../db/connection";
@@ -19,8 +19,8 @@ import { isPayoutOverdue, templateReply } from "./templates";
  *  - The draft is cached on the ticket and only regenerated when the conversation or category
  *    changes (or an admin explicitly asks). Opening the same ticket twice costs nothing.
  *  - Only the KB sections for the ticket's category are sent, not the whole KB.
- *  - The system prompt (persona + tone) and the category KB are separate cached blocks, so
- *    repeated drafts in the same category hit the prompt cache.
+ *  - The static system prompt (persona + tone) comes first and the category KB second, so
+ *    repeated drafts share a stable prefix that OpenAI's automatic prompt caching can reuse.
  *  - Conversation history is capped to the last MAX_MESSAGES messages, each clipped.
  *  - Account data is pre-formatted as terse facts: one book in detail, or one line per book.
  */
@@ -138,25 +138,20 @@ async function generate(ticket: TicketRow, category: Category): Promise<Omit<Dra
 
   try {
     const response = await trackedCall({ operation: "draft", ticketId: ticket.id }, (client) =>
-      client.beta.messages.parse({
+      client.chat.completions.parse({
         model: env.AI_MODEL,
-        max_tokens: 8000,
-        betas: ["server-side-fallback-2026-07-01"],
-        fallbacks: "default",
-        output_config: { effort: "medium", format: betaZodOutputFormat(DraftSchema) },
-        system: [
-          { type: "text", text: DRAFTER_SYSTEM, cache_control: { type: "ephemeral" } },
-          {
-            type: "text",
-            text: `# BookLeaf knowledge base (relevant sections)\n\n${knowledgeForCategory(category)}`,
-            cache_control: { type: "ephemeral" },
-          },
+        max_completion_tokens: 1200,
+        temperature: 0.4,
+        response_format: zodResponseFormat(DraftSchema, "draft_reply"),
+        messages: [
+          { role: "system", content: DRAFTER_SYSTEM },
+          { role: "system", content: `# BookLeaf knowledge base (relevant sections)\n\n${knowledgeForCategory(category)}` },
+          { role: "user", content: buildUserPrompt(ticket, category) },
         ],
-        messages: [{ role: "user", content: buildUserPrompt(ticket, category) }],
       }),
     );
-    const d = response.parsed_output;
-    if (!d) throw new Error(`Unparseable draft (stop_reason=${response.stop_reason})`);
+    const d = response.choices[0]?.message.parsed;
+    if (!d) throw new Error(`Unparseable draft (finish_reason=${response.choices[0]?.finish_reason})`);
     return {
       body: d.reply.trim(),
       source: "ai",

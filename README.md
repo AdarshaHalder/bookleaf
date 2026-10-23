@@ -30,7 +30,7 @@ Requirements: Node.js 20+ (22 recommended).
 
 ```bash
 npm run install:all                  # installs server/ and client/
-cp server/.env.example server/.env   # optionally add ANTHROPIC_API_KEY
+cp server/.env.example server/.env   # optionally add OPENAI_API_KEY
 
 npm run dev:server   # API on http://localhost:4000 (seeds the DB on first boot)
 npm run dev:client   # UI on  http://localhost:5173 (proxies /api to :4000)
@@ -73,7 +73,7 @@ The database is seeded with four realistic open tickets, so the queue isn't empt
 
 ```
 client/  React 18 + Vite + TypeScript + React Router (SPA)
-server/  Express 4 + TypeScript, SQLite (better-sqlite3), Zod, Anthropic SDK
+server/  Express 4 + TypeScript, SQLite (better-sqlite3), Zod, OpenAI SDK
   src/
     config/env.ts           typed, validated env (secrets only live here)
     db/                     schema, connection, seed (sample dataset + demo admins)
@@ -108,14 +108,14 @@ server/  Express 4 + TypeScript, SQLite (better-sqlite3), Zod, Anthropic SDK
 
 ## AI integration
 
-All AI code lives in `server/src/ai/`. The model is called only from the server, and the key is read from `ANTHROPIC_API_KEY` in `config/env.ts`. It is never sent to the browser or committed.
+All AI code lives in `server/src/ai/`. The model is called only from the server, and the key is read from `OPENAI_API_KEY` in `config/env.ts`. It is never sent to the browser or committed.
 
 ### 1. Classification (category + priority): `ai/classifier.ts`
 
 - **Prompt**: a static system prompt with a definition for each category and a **priority rubric** with concrete examples ("royalties unpaid 6+ months → Critical", "update my bio → Low, even if marked URGENT").
 - **Input**: only the subject, the description (clipped) and a one-line account hint, such as *"Book X is live since 2024-07-05; ₹2,546 pending; has never received a royalty payout"*. That hint lets the model rank "where's my royalty?" higher for an author who has genuinely never been paid.
-- **Output**: structured outputs (`output_config.format` from a Zod schema via `client.beta.messages.parse`). The result is parsed and validated against the schema: no regex-scraping of JSON, and an invalid enum value is rejected and handled by the fallback.
-- **Effort `low`**: this is a short classification task, so we don't pay for deep reasoning.
+- **Output**: structured outputs in strict JSON-schema mode (`response_format` from a Zod schema via `client.chat.completions.parse`). The model can only return valid categories and priorities, and the result is parsed and validated again: no regex-scraping of JSON.
+- **Temperature 0, 300 max tokens**: this is a short, deterministic classification task.
 - Admins can override either field. Re-running classification never touches an overridden field.
 
 ### 2. Draft responses: `ai/drafter.ts`
@@ -140,7 +140,7 @@ The draft comes back structured, so the admin sees more than text:
 | No API key / `AI_DISABLED=true` | Rules classifier (`ai/rulesClassifier.ts`) and policy templates (`ai/templates.ts`) are used from the start. The UI says so. |
 | Timeout, 429, 5xx, network error | The SDK retries twice with backoff (`maxRetries: 2`, `AI_TIMEOUT_MS` per attempt). Then we fall back. The ticket is **always** created, because classification runs after the insert, in the background. |
 | Repeated failures | **Circuit breaker** (`ai/client.ts`): after 3 consecutive failures, AI calls stop for 60s and fallbacks are used immediately, so nobody waits on timeouts during an outage. |
-| Model refusal / unparseable output | Treated as a failure, so the fallback is used. Requests also opt into the API's server-side refusal fallback (`fallbacks: "default"`). |
+| Model refusal / truncated or unparseable output | Treated as a failure, so the fallback is used. |
 | Fallback classification | Marked `classification_status = 'fallback'` and tagged **RULES** in the UI. Admins can click *Re-run* once AI is back. |
 | Template draft | Tagged **Template draft** with a warning banner. It still includes the author's name, book, real ₹ figures, payout dates and the correct policy timelines, so it's usable with light edits. It is regenerated automatically once AI is available again. |
 
@@ -153,18 +153,18 @@ Every call, successful or not, is logged to `ai_usage` with its tokens, cache re
 - **Account data is pre-formatted** as compact facts, never raw JSON rows.
 - **Drafts are cached on the ticket** and reused until the conversation or category changes. Opening a ticket ten times costs one call. Concurrent requests for the same ticket are de-duplicated.
 - **Drafts are only auto-generated when the author is waiting on BookLeaf.** After an admin replies, drafting is on demand ("✨ Draft with AI").
-- **Effort per task**: `low` for classification, `medium` for drafts.
-- **Prompt caching**: the system prompt and the category KB are separate, fully static blocks with `cache_control`, so drafts in the same category share a cached prefix. Note: prompts below the model's minimum cacheable length are silently not cached. `cache_read_tokens` in `ai_usage` shows whether caching is actually happening.
+- **Small output budgets**: 300 tokens for classification, 1,200 for drafts.
+- **Prompt caching**: the static system prompt comes first and the category KB second, so drafts in the same category share an identical prefix. OpenAI caches repeated prefixes automatically, but only once a prompt is at least 1,024 tokens, so short prompts won't be cached. `cache_read_tokens` in `ai_usage` shows whether caching is actually happening.
 - **Observability**: `GET /api/admin/stats` returns call counts, success rates, input/output/cache tokens and average latency per operation, plus admin override counts (a proxy for classification accuracy).
 
 ### 5. Model choice
 
-Default: **Claude Opus 5.5** (`claude-opus-5-5`), via the official Anthropic TypeScript SDK.
+Default: **OpenAI `gpt-4o-mini`**, via the official OpenAI Node SDK.
 
-- Draft quality is the highest-weighted part of this system: tone, policy accuracy, and using the numbers correctly. A strong model gets the empathetic-but-specific BookLeaf voice right with little prompt tuning.
-- The **effort** setting is the main cost lever: classification runs at `low`, drafts at `medium`, so the stronger model is only paid for where it matters.
-- **Structured outputs** remove a whole class of parsing failures.
-- The model is configurable via `AI_MODEL`. For production I'd measure moving classification to **Claude Haiku 5.5** (much cheaper per token) against the admin-override rate, keeping the stronger model for drafts. That split is a one-line change per operation.
+- It's inexpensive per token, which matters at BookLeaf's volume: every new ticket gets a classification call, and most get at least one draft.
+- It supports **strict structured outputs**, which removes a whole class of parsing failures and guarantees valid enum values.
+- Most of the quality comes from grounding, not model size: the server supplies the policies, the real numbers and the computed payout facts, so the model's job is mainly tone and assembly.
+- The model is configurable via `AI_MODEL` (e.g. `gpt-4o` for drafts if quality needs a boost). The admin-override rate and "sent as drafted vs. edited" data being logged are what I'd use to decide.
 
 ---
 
@@ -257,13 +257,13 @@ curl -s localhost:4000/api/tickets -H "Authorization: Bearer $TOKEN" -H 'Content
 npm test
 ```
 
-`server/tests/api.test.ts` runs the real Express app against an in-memory SQLite database with an **injected fake Anthropic client**. Nothing hits the network. It covers:
+`server/tests/api.test.ts` runs the real Express app against an in-memory SQLite database with an **injected fake OpenAI client**. Nothing hits the network. It covers:
 
 - login, generic credential errors, field-level validation errors, 401 on every protected route
 - RBAC: authors only see their own books and tickets (404 for others), admin-only actions return 403, internal notes never reach the author
 - ticket lifecycle: create → classify → reply (auto In Progress plus assignment) → resolve → author follow-up reopens → closed rejects replies
 - urgency sort and filters, books in production, the ₹1,000 threshold case
-- AI path: classification uses structured output at low effort with account context; drafts send only the category's KB, flag overdue payouts, and are cached until the conversation changes
+- AI path: classification uses strict structured output at temperature 0 with account context; drafts send only the category's KB, flag overdue payouts, and are cached until the conversation changes
 - degradation: AI down → rules classification and template drafts with real numbers; circuit breaker opens after repeated failures and stops calling the API
 - rules classifier: ISBN errors vs routine metadata edits
 
@@ -275,14 +275,14 @@ The UI was checked end to end in headless Chromium: author submits → admin see
 
 The repo includes a `Dockerfile` (one image: API plus built SPA) and a Render Blueprint (`render.yaml`, with a persistent disk for SQLite and uploads).
 
-**Render**: New → Blueprint → select this repo → set `ANTHROPIC_API_KEY` → deploy. `JWT_SECRET` is generated automatically. The database seeds itself on first boot.
+**Render**: New → Blueprint → select this repo → set `OPENAI_API_KEY` → deploy. `JWT_SECRET` is generated automatically. The database seeds itself on first boot.
 
 **Any Docker host**:
 
 ```bash
 docker build -t bookleaf .
 docker run -p 4000:4000 -v bookleaf-data:/data \
-  -e JWT_SECRET=$(openssl rand -hex 32) -e ANTHROPIC_API_KEY=sk-ant-... bookleaf
+  -e JWT_SECRET=$(openssl rand -hex 32) -e OPENAI_API_KEY=sk-... bookleaf
 ```
 
 Environment variables are documented in `server/.env.example`. In production the server refuses to start with the development `JWT_SECRET`.

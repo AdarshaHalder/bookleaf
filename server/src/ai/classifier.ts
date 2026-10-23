@@ -1,4 +1,4 @@
-import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
+import { zodResponseFormat } from "openai/helpers/zod";
 import { z } from "zod";
 import { env } from "../config/env";
 import { getDb } from "../db/connection";
@@ -13,11 +13,11 @@ import { classifyWithRules } from "./rulesClassifier";
 /**
  * Classifies a ticket into a category + priority.
  *
- * - Structured outputs (`output_config.format`) guarantee the response matches the schema, so
- *   there is no brittle JSON parsing and the enums can only be valid values.
- * - Low effort: this is a short classification task, so we don't pay for deep reasoning.
+ * - Structured outputs (strict JSON schema via `zodResponseFormat`) guarantee the response
+ *   matches the schema, so there is no brittle JSON parsing and the enums can only be valid.
+ * - Temperature 0 and a small max_tokens: this is a short, deterministic classification.
  * - Input is small: subject + description (clipped) + a 1–2 line account hint. No KB, no
- *   history — the rubric in the cached system prompt is all the model needs.
+ *   history — the rubric in the static system prompt is all the model needs.
  * - Any failure falls back to the keyword classifier, so a ticket is never left unclassified.
  */
 
@@ -62,18 +62,19 @@ Today: ${new Date().toISOString().slice(0, 10)}`;
 
   try {
     const response = await trackedCall({ operation: "classify", ticketId }, (client) =>
-      client.beta.messages.parse({
+      client.chat.completions.parse({
         model: env.AI_MODEL,
-        max_tokens: 2000,
-        betas: ["server-side-fallback-2026-07-01"],
-        fallbacks: "default",
-        output_config: { effort: "low", format: betaZodOutputFormat(ClassificationSchema) },
-        system: [{ type: "text", text: CLASSIFIER_SYSTEM, cache_control: { type: "ephemeral" } }],
-        messages: [{ role: "user", content: userContent }],
+        max_completion_tokens: 300,
+        temperature: 0,
+        response_format: zodResponseFormat(ClassificationSchema, "ticket_classification"),
+        messages: [
+          { role: "system", content: CLASSIFIER_SYSTEM },
+          { role: "user", content: userContent },
+        ],
       }),
     );
-    const parsed = response.parsed_output;
-    if (!parsed) throw new Error(`Unparseable classification (stop_reason=${response.stop_reason})`);
+    const parsed = response.choices[0]?.message.parsed;
+    if (!parsed) throw new Error(`Unparseable classification (finish_reason=${response.choices[0]?.finish_reason})`);
     return { ...parsed, source: "ai" };
   } catch (err) {
     console.warn(`[ai] classification failed for ticket ${ticketId}, using rules:`, (err as Error).message);

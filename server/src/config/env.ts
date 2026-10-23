@@ -3,7 +3,7 @@ import { z } from "zod";
 
 /**
  * All runtime configuration is read from environment variables exactly once, validated,
- * and exported as a typed object. Secrets (JWT_SECRET, ANTHROPIC_API_KEY) never leave the
+ * and exported as a typed object. Secrets (JWT_SECRET, OPENAI_API_KEY) never leave the
  * server process — the client bundle has no access to them.
  */
 const EnvSchema = z.object({
@@ -16,8 +16,8 @@ const EnvSchema = z.object({
   CORS_ORIGIN: z.string().default("http://localhost:5173"),
 
   // AI — the key is optional so the app still runs (with rules-based fallbacks) without one.
-  ANTHROPIC_API_KEY: z.string().optional(),
-  AI_MODEL: z.string().default("claude-opus-5-5"),
+  OPENAI_API_KEY: z.string().optional(),
+  AI_MODEL: z.string().default("gpt-4o-mini"),
   AI_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
   AI_DISABLED: z
     .string()

@@ -51,7 +51,7 @@ export function QueuePage() {
         <h1>Ticket queue</h1>
         {s && (
           <div className={`ai-pill ${s.ai.status.configured && !s.ai.status.circuitOpen ? "ok" : "warn"}`}
-            title={s.ai.status.configured ? `Model: ${s.ai.status.model}` : "Set ANTHROPIC_API_KEY to enable AI"}>
+            title={s.ai.status.configured ? `Model: ${s.ai.status.model}` : "Set OPENAI_API_KEY to enable AI"}>
             {!s.ai.status.configured ? "AI off · rules & templates in use" : s.ai.status.circuitOpen ? "AI degraded · fallbacks in use" : "AI assist on"}
           </div>
         )}
